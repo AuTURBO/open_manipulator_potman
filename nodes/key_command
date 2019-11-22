@@ -1,0 +1,117 @@
+#!/usr/bin/env python
+
+# Copyright (c) 2011, Willow Garage, Inc.
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+#    * Redistributions of source code must retain the above copyright
+#      notice, this list of conditions and the following disclaimer.
+#    * Redistributions in binary form must reproduce the above copyright
+#      notice, this list of conditions and the following disclaimer in the
+#      documentation and/or other materials provided with the distribution.
+#    * Neither the name of the Willow Garage, Inc. nor the names of its
+#      contributors may be used to endorse or promote products derived from
+#       this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+import rospy
+import sys, select, os
+if os.name == 'nt':
+  import msvcrt
+else:
+  import tty, termios
+from std_msgs.msg import Int8
+from std_msgs.msg import String
+
+msg = """
+0. Start Pour\n1. Start cheers ( Picking cup & Cup tracking ) \n2. Stop cheers ( Realease Cup )\n3. Serve Food \n4. Start Phone ( PICKING phone & face tracking ) \n5. Stop Phone ( Realease Phone )\n6. Stop \n7. Restart \n8. Panorama Shot \n
+"""
+
+e = """
+erro happened
+"""
+
+def getKey():
+    if os.name == 'nt':
+      return msvcrt.getch()
+
+    tty.setraw(sys.stdin.fileno())
+    rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
+    if rlist:
+        key = sys.stdin.read(1)
+    else:
+        key = ''
+
+    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, settings)
+    return key
+
+if __name__=="__main__":
+    if os.name != 'nt':
+        settings = termios.tcgetattr(sys.stdin)
+
+    rospy.init_node('potman_key_command')
+    #pub = rospy.Publisher('command_Key', Int8, queue_size=10)
+    pub = rospy.Publisher('command_Key', String, queue_size=10)
+    ch = Int8()
+    repeap_cheer_mode = False
+    try:
+        print msg
+        while(1):
+            key = getKey()
+            if key == '0' :
+                print msg
+                print 'Press 0, Start Pour Alchol\n'
+                pub.publish("0")
+            elif key == '1' :
+                print msg
+                print 'Press 1, Start cheers ( Picking cup & Cup tracking )\n'
+                pub.publish("1")
+            elif key == '2' :
+                print msg
+                print 'Press 2, Stop cheers ( Release cup )\n'
+                pub.publish("2")
+            elif key == '3' :
+                print msg
+                print 'Press 3, Serve Food \n'
+                pub.publish("3")
+            elif key == '4' :
+                print msg
+                print 'Press 4, Start Phone ( PICKING phone & face tracking )\n'
+                pub.publish("4")
+            elif key == '5' :
+                print msg
+                print 'Press 5, Stop Phone ( Release phone )\n'
+                pub.publish("5")
+            elif key == '6' :
+                print msg
+                print 'Press 6, Stop \n'
+                pub.publish("6")
+            elif key == '7' :
+                print msg
+                print 'Press 7, ReStart \n'
+                pub.publish("7")
+            elif key == '8' :
+                print msg
+                print 'Press 8, Panorama Shot \n'
+                pub.publish("8")
+            else:
+                if (key == '\x03'):
+                    break
+    except:
+        print e 
+
+    if os.name != 'nt':
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, settings)

@@ -1,0 +1,472 @@
+#!/usr/bin/env python
+
+import rospy
+import rospkg
+
+import smach
+import smach_ros
+from smach_ros import SimpleActionState
+from smach_ros import ServiceState
+from std_msgs.msg import String
+import time
+from sensor_msgs.msg import JointState
+
+# Manipulator 
+from open_manipulator_msgs.msg import JointPosition
+from open_manipulator_msgs.msg import KinematicsPose
+from open_manipulator_msgs.msg import OpenManipulatorState
+from open_manipulator_msgs.srv import SetJointPosition
+from open_manipulator_msgs.srv import SetKinematicsPose
+from open_manipulator_msgs.srv import GetJointPosition
+from open_manipulator_msgs.srv import GetKinematicsPose
+
+import fileActionClass
+import trackingActionClass
+import cheersActionByYoloJskClass
+
+class waitCommand(smach.State):
+    def __init__(self):
+        smach.State.__init__(self, outcomes=['succeeded','aborted','option0','option1','option2','option3','option4','option5'])
+        self.command_Key_sub = rospy.Subscriber('command_Key', String, self.commandKeyCallback)
+        self.mode = 9
+
+    def commandKeyCallback(self, msg):
+        #rospy.logwarn('1commandKeyCallback %d', msg.data) 
+        if msg.data == "0" :
+            self.mode = 0
+        elif msg.data == "1" :
+            self.mode = 1
+        elif msg.data == "2" :
+            self.mode = 2
+        elif msg.data == "3" :
+            self.mode = 3
+        elif msg.data == "4" :
+            self.mode = 4
+        elif msg.data == "5" :
+            self.mode = 5
+        else :
+            pass
+
+    def execute(self, userdata):
+        self.mode = 9
+        #print '0. Pour Mode\n1. Cheer Mode\n2. Release Cup\n3. Finish \n' 
+        
+        while 1 :
+            if rospy.is_shutdown() :
+                return 'succeeded' 
+            if self.mode == 0 :
+                rospy.logwarn('Start Pour Alchol')
+                return 'option0' 
+            elif self.mode == 1 :
+                rospy.logwarn('Start cheers ( Picking cup & Cup tracking )')        
+                return 'option1' 
+            elif self.mode == 2 :
+                rospy.logwarn('Stop cheers ( Release cup )')        
+                return 'option2' 
+            elif self.mode == 3 :
+                rospy.logwarn('Serve Food')        
+                return 'option3' 
+            elif self.mode == 4 :
+                rospy.logwarn('Start Phone ( PICKING phone & face tracking )')        
+                return 'option4'
+            elif self.mode == 5 :
+                rospy.logwarn('Stop Phone ( Release phone )')        
+                return 'option5' 
+            else :
+                pass 
+
+def main():
+    rospy.init_node('pick_and_place_state_machine2')
+    namespace = rospy.get_param("~robot_name")
+    planning_group = rospy.get_param("~planning_group")
+    detection_type = rospy.get_param("~detection_type")
+    pick_center = smach.StateMachine(outcomes=['succeeded','aborted','preempted','option0','option1','option2','option3','option4','option5'])
+   
+    rospack = rospkg.RosPack()
+    rospack.list() 
+    package_path = rospack.get_path('open_manipulator_potman')
+    rospy.logwarn("detection_type %s",detection_type )    
+    use_platform = rospy.get_param("~use_platform") 
+ 
+    with open(package_path+'/cfg/output_pour.txt') as data:
+        inputfile_pour = [[float(i) for i in line.split(",")] for line in data.readlines()]
+        #print(numbers[0])
+    with open(package_path+'/cfg/output_serve.txt') as data:
+        inputfile_serve = [[float(i) for i in line.split(",")] for line in data.readlines()]
+        #print(numbers[0])
+
+    with pick_center:
+        pick_center.userdata.planning_group = planning_group
+
+        def joint_position_request_cb(userdata, request):
+            request.joint_position.joint_name = ['joint1','joint2','joint3','joint4']
+            request.joint_position.position = userdata.input_position
+            request.path_time = userdata.input_time
+            return request
+
+        def joint_position_response_cb(userdata, response):
+            if response.is_planned == False:
+                rospy.sleep(userdata.input_time)
+                return 'aborted'
+            else:
+                rospy.sleep(userdata.input_time)
+                return 'succeeded'
+
+        def gripper_request_cb(userdata, request):
+            request.joint_position.joint_name = ['gripper']
+            request.joint_position.position = userdata.input_gripper
+            request.path_time = userdata.input_time
+            return request
+
+        def gripper_response_cb(userdata, response):
+            if response.is_planned == False:
+                #return 'aborted'
+                rospy.sleep(userdata.input_time)
+                return 'succeeded'
+            else:
+                rospy.sleep(userdata.input_time)
+                return 'succeeded'
+        
+        pick_center.userdata.potman_init_position = [0.0, -1.05, 0.35, 0.70]
+        pick_center.userdata.potman_init_position_time = 3
+        smach.StateMachine.add('POTMAN_INIT_POSITION',
+                                ServiceState('/open_manipulator/goal_joint_space_path',
+                                             SetJointPosition,
+                                             request_cb=joint_position_request_cb,
+                                             response_cb=joint_position_response_cb,
+                                             input_keys=['input_planning_group',
+                                                         'input_time',
+                                                         'input_position']),
+                                transitions={'succeeded':'WAIT_COMMAND'},
+                                #transitions={'succeeded':'CHEERS_SEQUENCE'},
+                                remapping={'input_planning_group':'planning_group',
+                                            'input_time':'potman_init_position_time',
+                                            'input_position':'potman_init_position'})
+
+        smach.StateMachine.add('WAIT_COMMAND', waitCommand(),
+                                transitions={'succeeded':'WAIT_COMMAND',
+                                             'option0':'POUR_ALCOHOL',
+                                             'option1':'PICK_FIRST_POSITION',
+                                             'option2':'RELEASE_FIRST_POSITION',
+                                             'option3':'SERVE_FOOD',
+                                             'option4':'PICK_PHONE_FIRST_POSITION',
+                                             'option5':'RELEASE_PHONE_FIRST_POSITION',
+                                             'aborted':'aborted'})
+        ########## Start Pour Alchol ##################################################
+        pick_center.userdata.motionfile_pour = inputfile_pour	    
+        smach.StateMachine.add('POUR_ALCOHOL', fileActionClass.fileAction(),
+                                transitions={'succeeded':'POTMAN_INIT_POSITION',
+                                             'aborted':'succeeded'},
+                                remapping={'input_planning_group':'planning_group', 
+                                           'input_motionfile_file':'motionfile_pour'})
+
+
+        ########## Start cheers ( PICKING CUP ) ##################################################
+        pick_center.userdata.pick_first_position = [0.0, -0.097, 1.361, -0.905]
+        pick_center.userdata.pick_first_position_time = 3
+        smach.StateMachine.add('PICK_FIRST_POSITION',
+                                ServiceState('/open_manipulator/goal_joint_space_path',
+                                             SetJointPosition,
+                                             request_cb=joint_position_request_cb,
+                                             response_cb=joint_position_response_cb,
+                                             input_keys=['input_planning_group',
+                                                         'input_time',
+                                                         'input_position']),
+                                transitions={'succeeded':'PICK_GRIPPER_OPEN'},
+                                remapping={'input_planning_group':'planning_group',
+                                           'input_time':'pick_first_position_time',
+                                            'input_position':'pick_first_position'})
+
+        pick_center.userdata.pick_open_gripper = [0.01]
+        pick_center.userdata.pick_open_gripper_time = 0.5
+        smach.StateMachine.add('PICK_GRIPPER_OPEN',
+                                ServiceState('/open_manipulator/goal_tool_control',
+                                             SetJointPosition,
+                                             request_cb=gripper_request_cb,
+                                             response_cb=gripper_response_cb,
+                                             input_keys=['input_planning_group',
+                                                         'input_time',
+                                                         'input_gripper']),
+                                transitions={'succeeded':'PICK_SECOND_POSITION'},
+                                remapping={'input_planning_group':'planning_group',
+                                           'input_time':'pick_open_gripper_time',
+                                           'input_gripper':'pick_open_gripper'})
+
+
+        pick_center.userdata.pick_second_position = [0.0, 0.431, 0.703, -1.069]
+        pick_center.userdata.pick_second_position_time = 2
+        smach.StateMachine.add('PICK_SECOND_POSITION',
+                                ServiceState('/open_manipulator/goal_joint_space_path',
+                                             SetJointPosition,
+                                             request_cb=joint_position_request_cb,
+                                             response_cb=joint_position_response_cb,
+                                             input_keys=['input_planning_group',
+                                                         'input_time',
+                                                         'input_position']),
+                                transitions={'succeeded':'PICK_GRIPPER_CLOSE'},
+                                #transitions={'succeeded':'succeeded'},
+                                remapping={'input_planning_group':'planning_group',
+                                           'input_time':'pick_second_position_time',
+                                            'input_position':'pick_second_position'})
+
+        if use_platform :
+            pick_center.userdata.pick_close_gripper = [0.0039]
+        else :
+            pick_center.userdata.pick_close_gripper = [-0.01]
+        pick_center.userdata.pick_close_gripper_time = 2
+        smach.StateMachine.add('PICK_GRIPPER_CLOSE',
+                                ServiceState('/open_manipulator/goal_tool_control',
+                                             SetJointPosition,
+                                             request_cb=gripper_request_cb,
+                                             response_cb=gripper_response_cb,
+                                             input_keys=['input_planning_group',
+                                                         'input_time',
+                                                         'input_gripper']),
+                                transitions={'succeeded':'PICK_THIRD_POSITION'},
+                                remapping={'input_planning_group':'planning_group',
+                                           'input_time':'pick_close_gripper_time',
+                                           'input_gripper':'pick_close_gripper'})
+
+        pick_center.userdata.pick_third_position = [0.0, -1.049, 0.359, 0.716]
+        pick_center.userdata.pick_third_position_time = 3
+        smach.StateMachine.add('PICK_THIRD_POSITION',
+                                ServiceState('/open_manipulator/goal_joint_space_path',
+                                             SetJointPosition,
+                                             request_cb=joint_position_request_cb,
+                                             response_cb=joint_position_response_cb,
+                                             input_keys=['input_planning_group',
+                                                         'input_time',
+                                                         'input_position']),
+                                transitions={'succeeded':'CHEERS_SEQUENCE'},
+                                #transitions={'succeeded':'succeeded'},
+                                remapping={'input_planning_group':'planning_group',
+                                           'input_time':'pick_third_position_time',
+                                            'input_position':'pick_third_position'})
+
+        ########## cheers ( TRACKING CUP ) ##################################################
+        smach.StateMachine.add('CHEERS_SEQUENCE', cheersActionByYoloJskClass.cheersActionByYoloJsk(),
+                                transitions={'succeeded':'RELEASE_FIRST_POSITION',
+                                             'aborted':'aborted'},
+                                remapping={'input_planning_group':'planning_group'})
+
+        ########## cheers ( RELEASE CUP ) ##################################################
+
+        pick_center.userdata.release_first_position = [0.0, -0.485, 1.173, -0.472]
+        pick_center.userdata.release_first_position_time = 2
+        smach.StateMachine.add('RELEASE_FIRST_POSITION',
+                                ServiceState('/open_manipulator/goal_joint_space_path',
+                                             SetJointPosition,
+                                             request_cb=joint_position_request_cb,
+                                             response_cb=joint_position_response_cb,
+                                             input_keys=['input_planning_group',
+                                                         'input_time',
+                                                         'input_position']),
+                                transitions={'succeeded':'RELEASE_SECOND_POSITION'},
+                                #transitions={'succeeded':'succeeded'},
+                                remapping={'input_planning_group':'planning_group',
+                                           'input_time':'release_first_position_time',
+                                            'input_position':'release_first_position'})
+
+        pick_center.userdata.release_second_position = [0.0, 0.431, 0.703, -1.069]
+        pick_center.userdata.release_second_position_time = 3
+        smach.StateMachine.add('RELEASE_SECOND_POSITION',
+                                ServiceState('/open_manipulator/goal_joint_space_path',
+                                             SetJointPosition,
+                                             request_cb=joint_position_request_cb,
+                                             response_cb=joint_position_response_cb,
+                                             input_keys=['input_planning_group',
+                                                         'input_time',
+                                                         'input_position']),
+                                transitions={'succeeded':'RELEASE_GRIPPER_OPEN'},
+                                #transitions={'succeeded':'succeeded'},
+                                remapping={'input_planning_group':'planning_group',
+                                           'input_time':'release_second_position_time',
+                                            'input_position':'release_second_position'})
+
+        pick_center.userdata.release_open_gripper = [0.01]
+        pick_center.userdata.release_open_gripper_time = 2
+        smach.StateMachine.add('RELEASE_GRIPPER_OPEN',
+                                ServiceState('/open_manipulator/goal_tool_control',
+                                             SetJointPosition,
+                                             request_cb=gripper_request_cb,
+                                             response_cb=gripper_response_cb,
+                                             input_keys=['input_planning_group',
+                                                         'input_time',
+                                                         'input_gripper']),
+                                transitions={'succeeded':'POTMAN_INIT_POSITION'},
+                                remapping={'input_planning_group':'planning_group',
+                                           'input_time':'release_open_gripper_time',
+                                           'input_gripper':'release_open_gripper'})
+
+        ########## SERVE FOOD ##################################################
+        pick_center.userdata.motionfile_serve = inputfile_serve	    
+        smach.StateMachine.add('SERVE_FOOD', fileActionClass.fileAction(),
+                                transitions={'succeeded':'POTMAN_INIT_POSITION',
+                                             'aborted':'succeeded'},
+                                remapping={'input_planning_group':'planning_group', 
+                                           'input_motionfile_file':'motionfile_serve'})
+
+        ########## Start phone ( PICKING PHONE ) ##################################################
+        pick_center.userdata.pick_phone_first_position = [1.57, 0.109, -0.882, 1.925]
+        pick_center.userdata.pick_phone_first_position_time = 3
+        smach.StateMachine.add('PICK_PHONE_FIRST_POSITION',
+                                ServiceState('/open_manipulator/goal_joint_space_path',
+                                             SetJointPosition,
+                                             request_cb=joint_position_request_cb,
+                                             response_cb=joint_position_response_cb,
+                                             input_keys=['input_planning_group',
+                                                         'input_time',
+                                                         'input_position']),
+                                transitions={'succeeded':'PICK_PHONE_GRIPPER_OPEN'},
+                                remapping={'input_planning_group':'planning_group',
+                                           'input_time':'pick_phone_first_position_time',
+                                            'input_position':'pick_phone_first_position'})
+
+        pick_center.userdata.pick_phone_open_gripper = [0.01]
+        pick_center.userdata.pick_phone_open_gripper_time = 0.5
+        smach.StateMachine.add('PICK_PHONE_GRIPPER_OPEN',
+                                ServiceState('/open_manipulator/goal_tool_control',
+                                             SetJointPosition,
+                                             request_cb=gripper_request_cb,
+                                             response_cb=gripper_response_cb,
+                                             input_keys=['input_planning_group',
+                                                         'input_time',
+                                                         'input_gripper']),
+                                transitions={'succeeded':'PICK_PHONE_SECOND_POSITION'},
+                                remapping={'input_planning_group':'planning_group',
+                                           'input_time':'pick_phone_open_gripper_time',
+                                           'input_gripper':'pick_phone_open_gripper'})
+
+
+        pick_center.userdata.pick_phone_second_position = [1.57, 0.518, -0.893, 1.928]
+        pick_center.userdata.pick_phone_second_position_time = 5
+        smach.StateMachine.add('PICK_PHONE_SECOND_POSITION',
+                                ServiceState('/open_manipulator/goal_joint_space_path',
+                                             SetJointPosition,
+                                             request_cb=joint_position_request_cb,
+                                             response_cb=joint_position_response_cb,
+                                             input_keys=['input_planning_group',
+                                                         'input_time',
+                                                         'input_position']),
+                                transitions={'succeeded':'PICK_PHONE_GRIPPER_CLOSE'},
+                                #transitions={'succeeded':'succeeded'},
+                                remapping={'input_planning_group':'planning_group',
+                                           'input_time':'pick_phone_second_position_time',
+                                            'input_position':'pick_phone_second_position'})
+
+        pick_center.userdata.pick_phone_close_gripper = [-0.01]
+        pick_center.userdata.pick_phone_close_gripper_time = 2
+        smach.StateMachine.add('PICK_PHONE_GRIPPER_CLOSE',
+                                ServiceState('/open_manipulator/goal_tool_control',
+                                             SetJointPosition,
+                                             request_cb=gripper_request_cb,
+                                             response_cb=gripper_response_cb,
+                                             input_keys=['input_planning_group',
+                                                         'input_time',
+                                                         'input_gripper']),
+                                transitions={'succeeded':'PICK_PHONE_THIRD_POSITION'},
+                                remapping={'input_planning_group':'planning_group',
+                                           'input_time':'pick_phone_close_gripper_time',
+                                           'input_gripper':'pick_phone_close_gripper'})
+
+        pick_center.userdata.pick_phone_third_position = [1.57, 0.109, -0.882, 1.925]
+        pick_center.userdata.pick_phone_third_position_time = 3
+        smach.StateMachine.add('PICK_PHONE_THIRD_POSITION',
+                                ServiceState('/open_manipulator/goal_joint_space_path',
+                                             SetJointPosition,
+                                             request_cb=joint_position_request_cb,
+                                             response_cb=joint_position_response_cb,
+                                             input_keys=['input_planning_group',
+                                                         'input_time',
+                                                         'input_position']),
+                                transitions={'succeeded':'FACE_TRACKING'},
+                                #transitions={'succeeded':'succeeded'},
+                                remapping={'input_planning_group':'planning_group',
+                                           'input_time':'pick_phone_third_position_time',
+                                            'input_position':'pick_phone_third_position'})
+
+
+        ########## phone ( TRACKING FACE ) ##################################################
+        smach.StateMachine.add('FACE_TRACKING', trackingActionClass.trackingAction(),
+                                transitions={'succeeded':'RELEASE_PHONE_FIRST_POSITION',
+                                             'aborted':'aborted'},
+                                remapping={'input_planning_group':'planning_group'})
+
+        ########## phone ( RELEASE PHONE ) ##################################################
+
+        pick_center.userdata.release_phone_first_position = [1.57, 0.109, -0.882, 1.925]
+        pick_center.userdata.release_phone_first_position_time = 2
+        smach.StateMachine.add('RELEASE_PHONE_FIRST_POSITION',
+                                ServiceState('/open_manipulator/goal_joint_space_path',
+                                             SetJointPosition,
+                                             request_cb=joint_position_request_cb,
+                                             response_cb=joint_position_response_cb,
+                                             input_keys=['input_planning_group',
+                                                         'input_time',
+                                                         'input_position']),
+                                transitions={'succeeded':'RELEASE_PHONE_SECOND_POSITION'},
+                                #transitions={'succeeded':'succeeded'},
+                                remapping={'input_planning_group':'planning_group',
+                                           'input_time':'release_phone_first_position_time',
+                                            'input_position':'release_phone_first_position'})
+
+        pick_center.userdata.release_phone_second_position = [1.57, 0.518, -0.893, 1.928]
+        pick_center.userdata.release_phone_second_position_time = 3
+        smach.StateMachine.add('RELEASE_PHONE_SECOND_POSITION',
+                                ServiceState('/open_manipulator/goal_joint_space_path',
+                                             SetJointPosition,
+                                             request_cb=joint_position_request_cb,
+                                             response_cb=joint_position_response_cb,
+                                             input_keys=['input_planning_group',
+                                                         'input_time',
+                                                         'input_position']),
+                                transitions={'succeeded':'RELEASE_PHONE_GRIPPER_OPEN'},
+                                #transitions={'succeeded':'succeeded'},
+                                remapping={'input_planning_group':'planning_group',
+                                           'input_time':'release_phone_second_position_time',
+                                            'input_position':'release_phone_second_position'})
+
+        pick_center.userdata.release_phone_open_gripper = [0.01]
+        pick_center.userdata.release_phone_open_gripper_time = 2
+        smach.StateMachine.add('RELEASE_PHONE_GRIPPER_OPEN',
+                                ServiceState('/open_manipulator/goal_tool_control',
+                                             SetJointPosition,
+                                             request_cb=gripper_request_cb,
+                                             response_cb=gripper_response_cb,
+                                             input_keys=['input_planning_group',
+                                                         'input_time',
+                                                         'input_gripper']),
+                                transitions={'succeeded':'RELEASE_PHONE_THIRD_POSITION'},
+                                remapping={'input_planning_group':'planning_group',
+                                           'input_time':'release_phone_open_gripper_time',
+                                           'input_gripper':'release_phone_open_gripper'})
+
+        pick_center.userdata.release_phone_third_position = [1.57, 0.109, -0.882, 1.925]
+        pick_center.userdata.release_phone_third_position_time = 2
+        smach.StateMachine.add('RELEASE_PHONE_THIRD_POSITION',
+                                ServiceState('/open_manipulator/goal_joint_space_path',
+                                             SetJointPosition,
+                                             request_cb=joint_position_request_cb,
+                                             response_cb=joint_position_response_cb,
+                                             input_keys=['input_planning_group',
+                                                         'input_time',
+                                                         'input_position']),
+                                transitions={'succeeded':'POTMAN_INIT_POSITION'},
+                                #transitions={'succeeded':'succeeded'},
+                                remapping={'input_planning_group':'planning_group',
+                                           'input_time':'release_phone_third_position_time',
+                                            'input_position':'release_phone_third_position'})
+
+
+    sis = smach_ros.IntrospectionServer('server_name', pick_center, '/PICK_CENTER')
+    sis.start()
+
+    # Execute SMACH plan
+    outcome = pick_center.execute()
+
+    # Wait for ctrl-c to stop the application
+    rospy.spin()
+    sis.stop()
+
+if __name__ == '__main__':
+    main()

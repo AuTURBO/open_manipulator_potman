@@ -1,0 +1,57 @@
+<launch>
+  <arg name="use_platform"	   default="true" />
+  <arg name="use_robot_name" default="open_manipulator"/>
+  <arg name="use_state_publisher" default="true"/>
+  <arg name="open_rviz"           default="true"/>
+
+  <arg name="camera_model" default="astra_pro" doc="model type [astra_pro, realsense_d435, raspicam]"/>
+  <arg name="camera_namespace" default="camera"/>
+  <arg name="depth_camera_info_url" default="" />
+
+  <arg name="use_zed"         default="false"  doc="Set to false when using Intel Realsense D435"/>
+
+  <group if="$(arg use_state_publisher)">
+
+    <group if="$(arg use_platform)">
+    	<param name="robot_description"
+          	command="$(find xacro)/xacro --inorder '$(find open_manipulator_description)/urdf/open_manipulator.urdf.xacro'"/>
+    </group>
+    <group unless="$(arg use_platform)">
+    	<param name="robot_description"
+          	command="$(find xacro)/xacro --inorder '$(find open_manipulator_gazebo_potman)/urdf/open_manipulator_realsense.urdf.xacro'"/>
+    </group>
+
+    <node pkg="joint_state_publisher" type="joint_state_publisher" name="joint_state_publisher">
+      <rosparam param="source_list" subst_value="true">["$(arg use_robot_name)/joint_states"]</rosparam>
+    </node>
+
+    <node name="robot_state_publisher" pkg="robot_state_publisher" type="state_publisher"/>
+  </group>
+
+  <group if="$(arg use_platform)">
+
+    <group if="$(eval camera_model == 'realsense_d435')">
+      <!--<include file="$(find realsense2_camera)/launch/rs_camera.launch">
+        <arg name="camera"                value="$(arg camera_namespace)"/>
+        <arg name="enable_pointcloud"     value="false" />
+      </include>-->
+      <include file="$(find realsense2_camera)/launch/rs_rgbd.launch"/>
+    </group>
+
+    <node pkg="tf" type="static_transform_publisher" name="camera_frame_to_realsense_frame"
+      args="0.12 0.01 0.062  0 0 0 link5 camera_link 10" />
+    <!--<node pkg="tf" type="static_transform_publisher" name="camera_frame_to_realsense_frame"
+      args="0.01 0.01 0.02  0 -0.1 0 link5 camera_link 10" />-->
+
+  </group>
+
+
+  <!-- DARKNET -->
+  <include file="$(find open_manipulator_potman)/launch/darknet_jsk.launch">
+    <arg name="use_zed" value="$(arg use_zed)"/>
+    <arg name="use_platform" value="$(arg use_platform)"/>
+  </include>
+
+</launch>
+
+

@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>open_manipulator_potman</name>
+  <version>1.1.0</version>
+  <description>
+    The tools package is open manipulator application
+  </description>
+  <license>Apache 2.0</license>
+  <author email="test@test.com">test</author>
+  <maintainer email="test@test.com">test</maintainer>
+  <buildtool_depend>catkin</buildtool_depend>
+  <depend>rospy</depend>
+  <depend>roslaunch</depend>
+  <depend>std_msgs</depend>
+  <depend>trajectory_msgs</depend>
+  <depend>open_manipulator_msgs</depend>
+  <depend>smach</depend>
+  <depend>smach_ros</depend>
+</package>

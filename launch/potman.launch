@@ -1,0 +1,15 @@
+<launch>
+  <arg name="use_robot_name"         default="open_manipulator"/>
+  <arg name="planning_group"         default="arm" />
+  <arg name="detection_type"         default="yolo_jsk" />
+  <arg name="use_platform"           default="true"/>
+  <!--There is two detection_type 1.yolo, 2.yolo_jsk--> 
+
+  <node name="potman_state_machine" pkg="open_manipulator_potman" type="potman_state_machine" output="screen">
+    <param name="robot_name"  value="$(arg use_robot_name)"/>
+    <param name="planning_group"  value="$(arg planning_group)"/>
+    <param name="detection_type"  value="$(arg detection_type)"/>
+    <param name="use_platform"  value="$(arg use_platform)"/>
+  </node>
+
+</launch>

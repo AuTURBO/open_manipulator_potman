@@ -1,0 +1,3 @@
+<launch>
+  <node name="key_command" pkg="open_manipulator_potman" type="key_command" output="screen"/>
+</launch>
